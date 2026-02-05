@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quantum FLP Catalysis Dashboard</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=JetBrains+Mono:wght@300;500&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg: #02040a;
+            --panel: rgba(13, 17, 23, 0.85);
+            --accent: #58a6ff;
+            --catalyst: #bc8cff; /* Xantphos-B(C6F5)3 Purple */
+            --success: #3fb950;
+            --border: #30363d;
+        }
+
+        body {
+            margin: 0; background-color: var(--bg); color: #c9d1d9;
+            font-family: 'JetBrains Mono', monospace; overflow: hidden;
+        }
+
+        /* 3D Container */
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+
+        /* UI Overlay */
+        .interface {
+            position: relative; z-index: 10; pointer-events: none;
+            display: grid; grid-template-columns: 350px 1fr 350px; height: 100vh; padding: 20px;
+        }
+
+        .panel {
+            background: var(--panel); border: 1px solid var(--border);
+            border-radius: 8px; padding: 20px; backdrop-filter: blur(12px);
+            pointer-events: auto; display: flex; flex-direction: column; gap: 15px;
+        }
+
+        h1, h2, h3 { font-family: 'Orbitron', sans-serif; margin: 0; color: var(--accent); }
+        .step-label { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 2px; }
+
+        /* Reaction Controls */
+        .controls { grid-column: 2; align-self: end; display: flex; justify-content: center; gap: 10px; padding-bottom: 40px; }
+        
+        button {
+            background: #21262d; border: 1px solid var(--border); color: white;
+            padding: 12px 20px; border-radius: 6px; cursor: pointer;
+            font-family: 'Orbitron'; font-size: 0.7rem; transition: 0.3s;
+        }
+
+        button:hover { background: var(--accent); color: black; border-color: var(--accent); }
+        button:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        /* Data Viz */
+        .metric-card { background: rgba(0,0,0,0.4); border-radius: 4px; padding: 12px; border-left: 3px solid var(--accent); }
+        .metric-val { font-size: 1.2rem; color: var(--success); font-weight: bold; }
+        .metric-label { font-size: 0.65rem; color: #8b949e; }
+
+        #reaction-coord-container { height: 200px; width: 100%; }
+
+        .status-light { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
+        
+        /* Alert Area */
+        #alert-hub {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            text-align: center; pointer-events: none;
+        }
+        #stage-msg { font-family: 'Orbitron'; font-size: 1.5rem; text-shadow: 0 0 10px var(--accent); }
+    </style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="alert-hub">
+    <div id="stage-msg">INITIALIZING VQE WORKFLOW</div>
+    <div id="stage-sub" style="color: var(--catalyst);">CATALYST: [Xantphos-B(C6F5)3] FLP</div>
+</div>
+
+<div class="interface">
+    <!-- Left Panel: Quantum Telemetry -->
+    <div class="panel">
+        <div class="step-label">Quantum Telemetry</div>
+        <h3>System State</h3>
+        
+        <div class="metric-card">
+            <div class="metric-label">GROUND STATE ENERGY (Ha)</div>
+            <div class="metric-val" id="val-energy">-82.1450</div>
+        </div>
+        
+        <div class="metric-card" style="border-left-color: var(--catalyst);">
+            <div class="metric-label">BINDING ENERGY (KJ/mol)</div>
+            <div class="metric-val" id="val-binding">0.00</div>
+            <div style="font-size: 0.6rem;">Target: -15 to -40 (DOE)</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">GIBBS FREE ENERGY (ΔG)</div>
+            <div class="metric-val" id="val-gibbs">0.00</div>
+            <div id="spontaneity" style="font-size: 0.6rem; color: var(--accent);">Non-Spontaneous</div>
+        </div>
+
+        <div style="margin-top: auto;">
+            <div class="step-label">Active Geometry</div>
+            <div style="font-size: 0.75rem; line-height: 1.6;">
+                <span class="status-light" style="background:#58a6ff"></span>Nitrogen sp3 → sp<br>
+                <span class="status-light" style="background:#bc8cff"></span>Boron FLP Site<br>
+                <span class="status-light" style="background:#fff"></span>H2 (Release Vector)
+            </div>
+        </div>
+    </div>
+
+    <!-- Center: Controls -->
+    <div class="controls">
+        <button id="btn-bind" onclick="stepBind()">1. Bind Catalyst</button>
+        <button id="btn-rel1" onclick="stepRelease(1)" disabled>2. Release H2 (1st)</button>
+        <button id="btn-rel2" onclick="stepRelease(2)" disabled>3. Release H2 (2nd)</button>
+        <button id="btn-rel3" onclick="stepRelease(3)" disabled>4. Final Release (3rd)</button>
+    </div>
+
+    <!-- Right Panel: Energy Landscape -->
+    <div class="panel">
+        <div class="step-label">Thermodynamic Profile</div>
+        <h3>PES Mapping</h3>
+        <div id="reaction-coord-container">
+            <canvas id="reactionChart"></canvas>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-label">REACTION PATHWAY</div>
+            <div id="path-desc" style="font-size: 0.7rem; color: #8b949e;">Waiting for binding...</div>
+        </div>
+
+        <div class="metric-card" style="background: rgba(63, 185, 80, 0.1);">
+            <div class="metric-label">H2 TOTAL YIELD</div>
+            <div class="metric-val" id="val-yield">0/3 mol</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    /** 3D ENGINE **/
+    let scene, camera, renderer, clock, catalystField, abMolecule;
+    let nAtom, bAtom, hydrogens = [];
+    let currentStep = 0;
+    let reactionChart;
+
+    function init3D() {
+        const container = document.getElementById('canvas-container');
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        clock = new THREE.Clock();
+
+        // Lighting
+        const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambient);
+        const spot = new THREE.PointLight(0x58a6ff, 1, 100);
+        spot.position.set(10, 10, 10);
+        scene.add(spot);
+
+        // Catalyst Visual (Simplified FLP Active Site)
+        const fieldGeo = new THREE.IcosahedronGeometry(4, 2);
+        const fieldMat = new THREE.MeshBasicMaterial({ 
+            color: 0xbc8cff, wireframe: true, transparent: true, opacity: 0.1 
+        });
+        catalystField = new THREE.Mesh(fieldGeo, fieldMat);
+        scene.add(catalystField);
+
+        // Create NH3BH3
+        abMolecule = new THREE.Group();
+        scene.add(abMolecule);
+        
+        nAtom = createAtom(0x58a6ff, 0.5, -0.7, 0, 0); // Nitrogen
+        bAtom = createAtom(0xf472b6, 0.5, 0.7, 0, 0);  // Boron
+        abMolecule.add(nAtom, bAtom);
+
+        // Create 6 Hydrogens
+        const hPos = [
+            [-1.2, 0.7, 0.4], [-1.2, -0.7, 0.4], [-1.2, 0, -0.8],
+            [1.2, 0.7, -0.4], [1.2, -0.7, -0.4], [1.2, 0, 0.8]
+        ];
+        hPos.forEach((p, i) => {
+            const h = createAtom(0xffffff, 0.2, p[0], p[1], p[2]);
+            hydrogens.push(h);
+            abMolecule.add(h);
+        });
+
+        camera.position.set(0, 5, 12);
+        camera.lookAt(0, 0, 0);
+        
+        initChart();
+        animate();
+    }
+
+    function createAtom(color, size, x, y, z) {
+        const geo = new THREE.SphereGeometry(size, 32, 32);
+        const mat = new THREE.MeshPhongMaterial({ color, shininess: 100 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(x, y, z);
+        return mesh;
+    }
+
+    /** REACTION STEPS **/
+    
+    // 1. BINDING
+    function stepBind() {
+        gsap.to(catalystField.scale, { x: 0.7, y: 0.7, z: 0.7, duration: 2, ease: "elastic" });
+        gsap.to(catalystField.material, { opacity: 0.4, duration: 1 });
+        
+        updateMetrics("-82.1980", "-32.50", "-12.4", "Bound: AB-Catalyst Complex");
+        updateChartPoint(1, -32.5);
+        
+        document.getElementById('btn-bind').disabled = true;
+        document.getElementById('btn-rel1').disabled = false;
+        document.getElementById('stage-msg').innerText = "FLP BINDING SUCCESSFUL";
+    }
+
+    // 2. RELEASES
+    function stepRelease(count) {
+        const hIndex1 = count - 1;       // N-H
+        const hIndex2 = count + 2;       // B-H
+        const hPair = [hydrogens[hIndex1], hydrogens[hIndex2]];
+        
+        const releaseGroup = new THREE.Group();
+        scene.add(releaseGroup);
+        releaseGroup.add(hPair[0], hPair[1]);
+
+        // Path of H2 Release
+        const tl = gsap.timeline();
+        tl.to(hPair[0].position, { x: 0, y: 1.5, z: 0, duration: 1 })
+          .to(hPair[1].position, { x: 0, y: 1.7, z: 0, duration: 1 }, "<")
+          .to(releaseGroup.position, { y: 20, x: 10, duration: 2, ease: "power2.in" });
+
+        // Shorten N-B Bond (Electronic shift)
+        gsap.to(nAtom.position, { x: nAtom.position.x + 0.1, duration: 1 });
+        gsap.to(bAtom.position, { x: bAtom.position.x - 0.1, duration: 1 });
+
+        const energies = [
+            { e: "-81.95", b: "-10.2", g: "-8.1", m: "1st H2: NH2BH2 Product" },
+            { e: "-81.60", b: "+5.40", g: "-14.2", m: "2nd H2: NHBH Product" },
+            { e: "-81.20", b: "+12.1", g: "-28.5", m: "3rd H2: NBH Final Product" }
+        ];
+
+        const data = energies[count-1];
+        updateMetrics(data.e, data.b, data.g, data.m);
+        updateChartPoint(count + 1, parseFloat(data.g));
+        
+        document.getElementById(`btn-rel${count}`).disabled = true;
+        if(count < 3) document.getElementById(`btn-rel${count+1}`).disabled = false;
+        
+        document.getElementById('val-yield').innerText = `${count}/3 mol`;
+        document.getElementById('stage-msg').innerText = `H2 RELEASE #${count} DETECTED`;
+    }
+
+    /** UI HELPERS **/
+    function updateMetrics(e, b, g, m) {
+        document.getElementById('val-energy').innerText = e;
+        document.getElementById('val-binding').innerText = b;
+        document.getElementById('val-gibbs').innerText = g;
+        document.getElementById('path-desc').innerText = m;
+        
+        const gNum = parseFloat(g);
+        const spon = document.getElementById('spontaneity');
+        spon.innerText = gNum < 0 ? "Spontaneous Path" : "Energy Barrier Present";
+        spon.style.color = gNum < 0 ? "var(--success)" : "#f85149";
+    }
+
+    function initChart() {
+        const ctx = document.getElementById('reactionChart').getContext('2d');
+        reactionChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['Start', 'Bind', 'H2 #1', 'H2 #2', 'H2 #3'],
+                datasets: [{
+                    label: 'ΔG (KJ/mol)',
+                    data: [0, null, null, null, null],
+                    borderColor: '#58a6ff',
+                    backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                maintainAspectRatio: false,
+                scales: {
+                    y: { grid: { color: '#30363d' }, ticks: { color: '#8b949e' } },
+                    x: { grid: { display: false }, ticks: { color: '#8b949e' } }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+    function updateChartPoint(index, value) {
+        reactionChart.data.datasets[0].data[index] = value;
+        reactionChart.update();
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const t = clock.getElapsedTime();
+        
+        if(catalystField) {
+            catalystField.rotation.y += 0.005;
+            catalystField.rotation.z += 0.002;
+        }
+        
+        abMolecule.rotation.y += 0.002;
+        
+        // Micro-vibrations
+        hydrogens.forEach((h, i) => {
+            h.position.y += Math.sin(t * 5 + i) * 0.001;
+        });
+
+        renderer.render(scene, camera);
+    }
+
+    window.onload = init3D;
+</script>
+</body>
+</html>

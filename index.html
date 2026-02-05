@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Quantum FLP Virtual Lab | NH3BH3 Dehydrogenation (Frontend Only)</title>
+
+  <!-- Three.js + GSAP + Chart.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=JetBrains+Mono:wght@300;500&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg: #020408;
+      --panel: rgba(13, 17, 23, 0.92);
+      --accent: #58a6ff;
+      --catalyst: #bc8cff;
+      --success: #3fb950;
+      --danger: #f85149;
+      --border: #30363d;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: #c9d1d9;
+      font-family: 'JetBrains Mono', monospace;
+      overflow: hidden;
+      height: 100vh;
+    }
+
+    /* 3D */
+    #canvas-container {
+      position: absolute; inset: 0;
+      z-index: 1;
+    }
+
+    /* HUD */
+    .hud {
+      position: relative;
+      z-index: 10;
+      pointer-events: none;
+      display: grid;
+      grid-template-columns: 360px 1fr 360px;
+      height: 100%;
+      padding: 18px;
+      box-sizing: border-box;
+      gap: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      backdrop-filter: blur(14px);
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.75);
+      min-height: 200px;
+    }
+
+    h1, h3 {
+      font-family: 'Orbitron', sans-serif;
+      margin: 0;
+      letter-spacing: 2px;
+    }
+    h3 { color: var(--accent); }
+
+    .label-sm {
+      font-size: 0.65rem;
+      color: #8b949e;
+      text-transform: uppercase;
+    }
+
+    /* VQE chart area */
+    .vqe-window {
+      background: #000;
+      border: 1px solid #1f6feb;
+      height: 140px;
+      border-radius: 6px;
+      position: relative;
+      overflow: hidden;
+    }
+    .vqe-status {
+      position: absolute;
+      top: 6px; left: 8px;
+      font-size: 0.6rem;
+      color: var(--accent);
+      z-index: 5;
+      padding: 3px 6px;
+      border: 1px solid rgba(88,166,255,0.3);
+      border-radius: 6px;
+      background: rgba(0,0,0,0.35);
+    }
+    #vqeChart { width: 100% !important; height: 100% !important; }
+
+    /* Center HUD */
+    .center-hud {
+      grid-column: 2;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      padding-bottom: 26px;
+      gap: 16px;
+    }
+
+    .btn-group { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+    button {
+      background: #21262d;
+      border: 1px solid var(--border);
+      color: white;
+      padding: 12px 16px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-family: 'Orbitron';
+      font-size: 0.72rem;
+      transition: 0.25s;
+      letter-spacing: 0.5px;
+      pointer-events: auto;
+    }
+    button:hover:not(:disabled) {
+      border-color: var(--accent);
+      background: #30363d;
+      box-shadow: 0 0 18px rgba(88,166,255,0.5);
+      transform: translateY(-1px);
+    }
+    button:disabled { opacity: 0.25; cursor: not-allowed; }
+
+    /* Metric cards */
+    .metric-card {
+      background: rgba(0,0,0,0.25);
+      border: 1px solid rgba(48,54,61,0.7);
+      border-left: 4px solid var(--accent);
+      padding: 12px;
+      border-radius: 10px;
+    }
+    .val {
+      font-size: 1.15rem;
+      font-family: 'Orbitron';
+      color: var(--success);
+      margin-top: 4px;
+    }
+
+    /* Reaction log */
+    #reaction-log {
+      flex-grow: 1;
+      font-size: 0.72rem;
+      overflow-y: auto;
+      color: #8b949e;
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+    }
+    .log-entry {
+      margin-bottom: 8px;
+      border-left: 2px solid var(--accent);
+      padding-left: 10px;
+      animation: fadeIn 0.25s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateX(-5px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    /* Transition state alert */
+    #ts-alert {
+      position: absolute;
+      top: 45%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-family: 'Orbitron';
+      color: var(--danger);
+      font-size: 2rem;
+      display: none;
+      z-index: 100;
+      text-shadow: 0 0 25px rgba(248,81,73,0.9);
+      pointer-events: none;
+    }
+
+    /* Path chart */
+    #pathChart { width: 100% !important; height: 150px !important; }
+  </style>
+</head>
+
+<body>
+
+<div id="canvas-container"></div>
+<div id="ts-alert">TRANSITION STATE</div>
+
+<div class="hud">
+
+  <!-- LEFT: Quantum Solver -->
+  <div class="panel">
+    <div class="label-sm">Quantum Solver</div>
+    <h3>VQE CONVERGENCE</h3>
+
+    <div class="vqe-window">
+      <div class="vqe-status" id="vqe-msg">CORE IDLE</div>
+      <canvas id="vqeChart"></canvas>
+    </div>
+
+    <div class="metric-card">
+      <div class="label-sm">Ground State (E_sys)</div>
+      <div class="val" id="val-e">-- <span style="font-size:0.65rem;">Ha</span></div>
+    </div>
+
+    <div class="metric-card" style="border-left-color: var(--catalyst);">
+      <div class="label-sm">Binding ΔE (E4 − E1 − E2)</div>
+      <div class="val" id="val-bind">--</div>
+      <div id="doe-status" style="font-size:0.7rem; margin-top:6px; color:#8b949e;">
+        DOE Target: -15 to -40 kJ/mol
+      </div>
+    </div>
+
+    <div class="metric-card">
+      <div class="label-sm">Gibbs Free Energy (ΔG)</div>
+      <div class="val" id="val-gibbs">--</div>
+      <div id="thermo-label" style="font-size:0.7rem; margin-top:6px; color:#8b949e;">
+        Status: Ready
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER -->
+  <div class="center-hud">
+    <div style="text-align:center;">
+      <h1 style="font-size: 1.25rem; color: var(--accent);">FLP QUANTUM REACTOR</h1>
+      <div style="color: var(--catalyst); font-size: 0.72rem; letter-spacing: 3px; margin-top: 6px;">
+        [XANTPHOS–B(C6F5)3] ACTIVATED
+      </div>
+    </div>
+
+    <div class="btn-group">
+      <button id="btn-1" onclick="handleStep(1)">1. Bind Catalyst</button>
+      <button id="btn-2" onclick="handleStep(2)" disabled>2. Release H2 #1</button>
+      <button id="btn-3" onclick="handleStep(3)" disabled>3. Release H2 #2</button>
+      <button id="btn-4" onclick="handleStep(4)" disabled>4. Release H2 #3</button>
+      <button onclick="resetLab()">Reset</button>
+      <a href="#" target="_blank"><button>Video</button></a>
+    </div>
+  </div>
+
+  <!-- RIGHT: Reaction Pathway -->
+  <div class="panel">
+    <div class="label-sm">Reaction Coordinate</div>
+    <h3>PATHWAY LOG</h3>
+
+    <div id="reaction-log">
+      <div class="log-entry">System online. Awaiting binding sequence.</div>
+    </div>
+
+    <div style="height: 150px;">
+      <canvas id="pathChart"></canvas>
+    </div>
+
+    <div class="metric-card" style="border-left-color: #ffffff;">
+      <div class="label-sm">Active Yield</div>
+      <div style="display:flex; gap:10px; align-items:center; margin-top: 10px;">
+        <div id="y1" style="width:12px; height:12px; border-radius:3px; border:1px solid #fff;"></div>
+        <div id="y2" style="width:12px; height:12px; border-radius:3px; border:1px solid #fff;"></div>
+        <div id="y3" style="width:12px; height:12px; border-radius:3px; border:1px solid #fff;"></div>
+        <span id="yield-txt" style="font-size:0.78rem; margin-left:auto;">0/3 H2</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ---------------------------------------------------------
+   FRONTEND ONLY DATA (No backend)
+--------------------------------------------------------- */
+const MOLECULE_DATA = {
+  1: { e: "-82.1980", bind: "-34.12", gibbs: "-12.5", log: "FLP Catalyst successfully bound to AB. Dative bond formed." },
+  2: { e: "-81.9540", bind: "-10.50", gibbs: "-5.2", log: "1st H2 released. NH3BH3 → NH2BH2 + H2." },
+  3: { e: "-81.6210", bind: "+4.20", gibbs: "-18.4", log: "2nd H2 released. N–B bonding rearrangement detected." },
+  4: { e: "-81.1050", bind: "+12.80", gibbs: "-32.1", log: "Final H2 released. System stabilizes into NBH complex." }
+};
+
+let busy = false;
+
+/* ---------------------------------------------------------
+   THREE.JS 3D ENGINE
+--------------------------------------------------------- */
+let scene, camera, renderer, molecule, catalyst;
+let atoms = { n: null, b: null, h: [] };
+
+function init3D() {
+  scene = new THREE.Scene();
+
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.getElementById("canvas-container").appendChild(renderer.domElement);
+
+  // light
+  const p1 = new THREE.PointLight(0x58a6ff, 1.2, 100);
+  p1.position.set(5, 5, 7);
+  scene.add(p1);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.22));
+
+  // molecule group
+  molecule = new THREE.Group();
+  atoms.n = createAtom(0x58a6ff, 0.5, -0.7, 0, 0);
+  atoms.b = createAtom(0xbc8cff, 0.5, 0.7, 0, 0);
+  molecule.add(atoms.n, atoms.b);
+
+  // hydrogens
+  atoms.h = [];
+  const hPos = [
+    [-1.25, 0.70, 0.35], [-1.25,-0.70, 0.35], [-1.25, 0, -0.85],
+    [ 1.25, 0.70,-0.35], [ 1.25,-0.70,-0.35], [ 1.25, 0,  0.85]
+  ];
+  hPos.forEach(p => {
+    const h = createAtom(0xffffff, 0.22, p[0], p[1], p[2]);
+    atoms.h.push(h);
+    molecule.add(h);
+  });
+  scene.add(molecule);
+
+  // catalyst cage
+  const cageGeo = new THREE.IcosahedronGeometry(3.5, 1);
+  const cageMat = new THREE.MeshBasicMaterial({
+    color: 0xbc8cff, wireframe: true,
+    transparent: true, opacity: 0.08
+  });
+  catalyst = new THREE.Mesh(cageGeo, cageMat);
+  scene.add(catalyst);
+
+  camera.position.set(0, 3, 10);
+  camera.lookAt(0, 0, 0);
+
+  animate();
+}
+
+function createAtom(color, size, x, y, z) {
+  const geo = new THREE.SphereGeometry(size, 32, 32);
+  const mat = new THREE.MeshPhongMaterial({ color, shininess: 110 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, y, z);
+  return mesh;
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  molecule.rotation.y += 0.005;
+  catalyst.rotation.y -= 0.002;
+  renderer.render(scene, camera);
+}
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ---------------------------------------------------------
+   CHARTS
+--------------------------------------------------------- */
+let vqeChart, pathChart;
+
+function initCharts() {
+  vqeChart = new Chart(document.getElementById("vqeChart"), {
+    type: "line",
+    data: {
+      labels: Array(20).fill(""),
+      datasets: [{
+        data: [],
+        borderColor: "#58a6ff",
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.35
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { display: false }, y: { display: false } }
+    }
+  });
+
+  pathChart = new Chart(document.getElementById("pathChart"), {
+    type: "line",
+    data: {
+      labels: ["Start", "Bind", "H2-1", "H2-2", "H2-3"],
+      datasets: [{
+        label: "ΔG",
+        data: [0, null, null, null, null],
+        borderColor: "#bc8cff",
+        backgroundColor: "rgba(188,140,255,0.12)",
+        fill: true,
+        pointRadius: 4,
+        tension: 0.25
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: "#8b949e", font: { size: 10 } }, grid: { color: "#30363d" } },
+        y: { ticks: { color: "#8b949e", font: { size: 10 } }, grid: { color: "#30363d" } }
+      }
+    }
+  });
+}
+
+/* ---------------------------------------------------------
+   SIMULATION LOGIC
+--------------------------------------------------------- */
+async function handleStep(step) {
+  if (busy) return;
+  busy = true;
+
+  setLoading(true);
+  document.getElementById("vqe-msg").innerText = "RUNNING VQE OPTIMIZER...";
+
+  await simulateVQE();
+
+  const data = MOLECULE_DATA[step];
+  updateUI(step, data);
+  runAnimation(step);
+
+  document.getElementById("vqe-msg").innerText = "CONVERGED ✅";
+
+  // button gating
+  document.getElementById(`btn-${step}`).disabled = true;
+  if (step < 4) document.getElementById(`btn-${step + 1}`).disabled = false;
+
+  setLoading(false);
+  busy = false;
+}
+
+function simulateVQE() {
+  return new Promise(resolve => {
+    let count = 0;
+    const interval = setInterval(() => {
+      const val = -82.0 - (Math.random() * 0.6);
+      vqeChart.data.datasets[0].data.push(val);
+      if (vqeChart.data.datasets[0].data.length > 20) vqeChart.data.datasets[0].data.shift();
+      vqeChart.update();
+      count++;
+      if (count > 18) {
+        clearInterval(interval);
+        resolve();
+      }
+    }, 70);
+  });
+}
+
+/* ---------------------------------------------------------
+   ANIMATION
+--------------------------------------------------------- */
+function runAnimation(step) {
+  const alert = document.getElementById("ts-alert");
+
+  if (step === 1) {
+    gsap.to(catalyst.scale, { x: 0.85, y: 0.85, z: 0.85, duration: 1 });
+    gsap.to(catalyst.material, { opacity: 0.35, duration: 1 });
+    return;
+  }
+
+  // safe indices
+  const i1 = Math.max(0, step - 2);
+  const i2 = Math.min(atoms.h.length - 1, step + 1);
+
+  const h1 = atoms.h[i1];
+  const h2 = atoms.h[i2];
+
+  if (!h1 || !h2) return;
+
+  alert.style.display = "block";
+
+  // create H2 group
+  const h2Group = new THREE.Group();
+  scene.add(h2Group);
+  h2Group.add(h1);
+  h2Group.add(h2);
+
+  gsap.to(h2Group.position, {
+    y: 15, x: 10, duration: 2, ease: "power2.in",
+    onComplete: () => { alert.style.display = "none"; }
+  });
+
+  // Shorten N-B bond
+  gsap.to(atoms.n.position, { x: atoms.n.position.x + 0.1, duration: 0.8 });
+  gsap.to(atoms.b.position, { x: atoms.b.position.x - 0.1, duration: 0.8 });
+}
+
+/* ---------------------------------------------------------
+   UI UPDATE
+--------------------------------------------------------- */
+function updateUI(step, data) {
+  document.getElementById("val-e").innerText = `${data.e} Ha`;
+  document.getElementById("val-bind").innerText = `${data.bind} kJ/mol`;
+  document.getElementById("val-gibbs").innerText = `${data.gibbs} kJ/mol`;
+
+  // thermodynamic label
+  const thermo = document.getElementById("thermo-label");
+  const gibbs = parseFloat(data.gibbs);
+  if (gibbs < 0) {
+    thermo.innerText = "Status: Spontaneous ✅ (ΔG < 0)";
+    thermo.style.color = "var(--success)";
+  } else {
+    thermo.innerText = "Status: Non-spontaneous ⚠️";
+    thermo.style.color = "var(--danger)";
+  }
+
+  // log
+  const log = document.getElementById("reaction-log");
+  log.innerHTML = `<div class="log-entry">Step ${step}: ${data.log}</div>` + log.innerHTML;
+
+  // path chart: insert gibbs at index step
+  pathChart.data.datasets[0].data[step] = gibbs;
+  pathChart.update();
+
+  // yield
+  if (step >= 2) {
+    const yid = `y${step - 1}`;
+    const box = document.getElementById(yid);
+    if (box) box.style.background = "var(--success)";
+    document.getElementById("yield-txt").innerText = `${step - 1}/3 H2`;
+  }
+
+  // DOE binding range check at binding stage
+  if (step === 1) {
+    const bindVal = parseFloat(data.bind);
+    const doe = document.getElementById("doe-status");
+    const ok = (bindVal <= -15 && bindVal >= -40);
+
+    doe.innerText = ok ? "DOE TARGET MET ✅ (-15 to -40 kJ/mol)" : "OUTSIDE DOE RANGE ⚠️ (-15 to -40 kJ/mol)";
+    doe.style.color = ok ? "var(--success)" : "var(--danger)";
+  }
+}
+
+function setLoading(state) {
+  document.querySelectorAll("button").forEach(b => {
+    if (!b.disabled) b.style.opacity = state ? "0.35" : "1";
+  });
+}
+
+function resetLab() {
+  // reset UI values
+  document.getElementById("val-e").innerHTML = "-- <span style='font-size:0.65rem;'>Ha</span>";
+  document.getElementById("val-bind").innerText = "--";
+  document.getElementById("val-gibbs").innerText = "--";
+  document.getElementById("doe-status").innerText = "DOE Target: -15 to -40 kJ/mol";
+  document.getElementById("doe-status").style.color = "#8b949e";
+  document.getElementById("thermo-label").innerText = "Status: Ready";
+  document.getElementById("thermo-label").style.color = "#8b949e";
+  document.getElementById("yield-txt").innerText = "0/3 H2";
+  document.getElementById("y1").style.background = "";
+  document.getElementById("y2").style.background = "";
+  document.getElementById("y3").style.background = "";
+
+  // reset buttons
+  document.getElementById("btn-1").disabled = false;
+  document.getElementById("btn-2").disabled = true;
+  document.getElementById("btn-3").disabled = true;
+  document.getElementById("btn-4").disabled = true;
+
+  // reset charts
+  vqeChart.data.datasets[0].data = [];
+  vqeChart.update();
+  pathChart.data.datasets[0].data = [0, null, null, null, null];
+  pathChart.update();
+
+  // reset 3D
+  catalyst.scale.set(1,1,1);
+  catalyst.material.opacity = 0.08;
+}
+
+window.onload = () => {
+  init3D();
+  initCharts();
+};
+</script>
+
+</body>
+</html>
